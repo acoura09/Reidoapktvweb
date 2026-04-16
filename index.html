@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+    <title>REI DO APK - IPTV Total</title>
+    <script src="https://cdn.tailwindcss.com"></script> 
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        :root {
+            --config-fundo: url('https://i.supaimg.com/f39afda8-6b2e-4cf2-8ab9-b80ced5e2c75/ea4e5f51-4551-4889-85fd-ea25cfe87359.png');
+            --cor-dourado: linear-gradient(to right, #bf953f, #fcf6ba, #b38728, #fcf6ba, #aa771c);
+        }
+        body { 
+            background-color: #0a0a0a;
+            background-image: linear-gradient(rgba(0,0,0,0.9), rgba(0,0,0,0.9)), var(--config-fundo);
+            background-size: cover; background-position: center; background-attachment: fixed;
+            color: #fff; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; 
+        }
+        #intro-screen { position: fixed; inset: 0; background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center; transition: opacity 1s ease; }
+        .intro-text { font-size: 3rem; font-weight: 900; background: var(--cor-dourado); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-transform: uppercase; animation: pullAndBurst 3s forwards; }
+        @keyframes pullAndBurst { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(5); opacity: 0; } }
+        
+        .card-item { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden; transition: 0.3s; cursor: pointer; position: relative; }
+        .card-item:hover { border-color: #bf953f; transform: scale(1.03); z-index: 10; background: rgba(255,255,255,0.1); }
+        .active-nav { color: #bf953f !important; border-bottom: 2px solid #bf953f; }
+        
+        #player-overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: none; flex-direction: column; }
+        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #bf953f; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="pb-20 md:pb-0">
+
+    <div id="intro-screen"><div class="intro-text">REI DO APK</div></div>
+
+    <nav class="fixed top-0 w-full z-40 bg-black/90 backdrop-blur-md border-b border-white/10 px-6 h-16 flex items-center justify-between">
+        <h1 class="text-yellow-600 text-xl font-black cursor-pointer" onclick="location.reload()">REI DO<span class="text-white"> APK</span></h1>
+        
+        <div class="flex-1 max-w-md mx-4">
+            <input type="text" id="search-input" placeholder="Buscar canal, filme..." class="w-full bg-white/10 border border-white/20 rounded-full py-1 px-4 text-sm focus:outline-none focus:border-yellow-500">
+        </div>
+
+        <ul class="hidden md:flex gap-6 text-xs uppercase font-bold">
+            <li class="cursor-pointer hover:text-yellow-500 transition" onclick="sw('h')">Início</li>
+            <li class="cursor-pointer hover:text-yellow-500 transition" onclick="sw('t')">TV</li>
+            <li class="cursor-pointer hover:text-yellow-500 transition" onclick="sw('m')">Filmes</li>
+            <li class="cursor-pointer hover:text-yellow-500 transition" onclick="sw('s')">Séries</li>
+        </ul>
+    </nav>
+
+    <div id="player-overlay">
+        <div class="flex items-center justify-between p-4 bg-zinc-900">
+            <span id="player-title" class="font-bold text-yellow-500 truncate text-sm">REPRODUZINDO</span>
+            <button onclick="closePlayer()" class="bg-red-600 hover:bg-red-700 px-4 py-1 rounded text-white font-bold text-xs">FECHAR</button>
+        </div>
+        <div class="flex-1 flex items-center justify-center">
+            <video id="video-element" controls crossorigin="anonymous"></video>
+        </div>
+    </div>
+
+    <main id="app" class="pt-24 px-4 md:px-10 min-h-screen">
+        <div id="status-container" class="flex items-center gap-3 mb-6">
+            <div id="status-dot" class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"></div>
+            <h2 id="section-title" class="text-lg font-bold uppercase tracking-widest">Carregando Servidor...</h2>
+        </div>
+
+        <div id="grid-content" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            </div>
+    </main>
+
+    <div class="md:hidden fixed bottom-0 w-full bg-black/95 border-t border-white/10 z-40 flex justify-around p-4 text-gray-400">
+        <button onclick="sw('h')"><i data-lucide="home"></i></button>
+        <button onclick="sw('t')"><i data-lucide="tv"></i></button>
+        <button onclick="sw('m')"><i data-lucide="film"></i></button>
+        <button onclick="sw('s')"><i data-lucide="layers"></i></button>
+    </div>
+
+    <script>
+        // CONFIGURAÇÕES DO SERVIDOR
+        const CONFIG = {
+            base: "http://meucherry.xyz",
+            user: "004marcia",
+            pass: "Al1112"
+        };
+
+        let db = { t: [], m: [], s: [] }; // Categorias
+        let streams = { t: [], m: [], s: [] }; // Dados brutos
+        let currentTab = 'h';
+
+        // Inicialização
+        async function init() {
+            try {
+                // Carregar Categorias Primeiro para interface rápida
+                const [ct, cm, cs] = await Promise.all([
+                    fetchAPI('get_live_categories'),
+                    fetchAPI('get_vod_categories'),
+                    fetchAPI('get_series_categories')
+                ]);
+                
+                db.t = ct; db.m = cm; db.s = cs;
+                updateStatus("Servidor Online", "bg-green-500");
+                sw('h');
+
+                // Carregar streams em background (Lista pesada)
+                streams.t = await fetchAPI('get_live_streams');
+                streams.m = await fetchAPI('get_vod_streams');
+                streams.s = await fetchAPI('get_series');
+                
+                console.log("Carga total concluída");
+            } catch (err) {
+                updateStatus("Erro de Conexão", "bg-red-500");
+            }
+        }
+
+        async function fetchAPI(action) {
+            const r = await fetch(`${CONFIG.base}/player_api.php?username=${CONFIG.user}&password=${CONFIG.pass}&action=${action}`);
+            return r.json();
+        }
+
+        function updateStatus(txt, color) {
+            document.getElementById('section-title').innerText = txt;
+            document.getElementById('status-dot').className = `w-3 h-3 rounded-full ${color}`;
+        }
+
+        // Navegação
+        function sw(tab) {
+            currentTab = tab;
+            const grid = document.getElementById('grid-content');
+            grid.innerHTML = "";
+            
+            if(tab === 'h') {
+                updateStatus("Rei do APK - Início", "bg-green-500");
+                grid.innerHTML = `
+                    <div onclick="sw('t')" class="card-item p-8 flex flex-col items-center border-yellow-600/50"><i data-lucide="tv" class="mb-2 text-yellow-500"></i><b>TV AO VIVO</b></div>
+                    <div onclick="sw('m')" class="card-item p-8 flex flex-col items-center border-red-600/50"><i data-lucide="film" class="mb-2 text-red-500"></i><b>FILMES</b></div>
+                    <div onclick="sw('s')" class="card-item p-8 flex flex-col items-center border-blue-600/50"><i data-lucide="layers" class="mb-2 text-blue-500"></i><b>SÉRIES</b></div>
+                `;
+            } else {
+                const label = tab === 't' ? "Canais" : tab === 'm' ? "Filmes" : "Séries";
+                updateStatus(`Categorias: ${label}`, "bg-blue-500");
+                renderCards(db[tab], tab, true);
+            }
+            lucide.createIcons();
+        }
+
+        function renderCards(data, type, isCategory) {
+            const grid = document.getElementById('grid-content');
+            grid.innerHTML = data.map(item => {
+                const title = item.category_name || item.name || item.title;
+                const img = item.stream_icon || item.cover || 'https://via.placeholder.com/300x450?text=REI+APK';
+                const action = isCategory 
+                    ? `loadContent('${type}', '${item.category_id}', '${title}')`
+                    : `play('${item.stream_id || item.series_id}', '${type}', '${title.replace(/'/g, "")}')`;
+
+                return `
+                    <div onclick="${action}" class="card-item group">
+                        <img src="${img}" class="w-full ${type==='t'?'h-24':'aspect-[2/3]'} object-cover opacity-80 group-hover:opacity-100" onerror="this.src='https://via.placeholder.com/200x300?text=SEM+FOTO'">
+                        <div class="p-2">
+                            <p class="text-[10px] font-bold truncate uppercase text-zinc-300">${title}</p>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function loadContent(type, catId, catName) {
+            updateStatus(catName, "bg-yellow-500");
+            const filtered = streams[type].filter(i => i.category_id === catId);
+            renderCards(filtered, type, false);
+            window.scrollTo(0,0);
+        }
+
+        // Sistema de Busca
+        document.getElementById('search-input').oninput = (e) => {
+            const term = e.target.value.toLowerCase();
+            if(term.length < 3) return;
+            
+            // Busca em todas as listas (Canais, Filmes e Séries)
+            const results = [...streams.t, ...streams.m, ...streams.s].filter(i => 
+                (i.name || i.title || "").toLowerCase().includes(term)
+            ).slice(0, 30); // Limita a 30 resultados para performance
+
+            updateStatus(`Busca: ${term}`, "bg-purple-500");
+            renderCards(results, 'm', false);
+        };
+
+        // Player
+        function play(id, type, name) {
+            const v = document.getElementById('video-element');
+            const overlay = document.getElementById('player-overlay');
+            let url = "";
+
+            if(type === 't') url = `${CONFIG.base}/live/${CONFIG.user}/${CONFIG.pass}/${id}.m3u8`;
+            else if(type === 'm') url = `${CONFIG.base}/movie/${CONFIG.user}/${CONFIG.pass}/${id}.mp4`;
+            else url = `${CONFIG.base}/series/${CONFIG.user}/${CONFIG.pass}/${id}.mp4`;
+
+            document.getElementById('player-title').innerText = name;
+            overlay.style.display = "flex";
+
+            if (type === 't' && Hls.isSupported()) {
+                const hls = new Hls();
+                hls.loadSource(url);
+                hls.attachMedia(v);
+            } else {
+                v.src = url;
+                v.play().catch(() => alert("Erro ao reproduzir. Tente outro link."));
+            }
+        }
+
+        function closePlayer() {
+            const v = document.getElementById('video-element');
+            v.pause(); v.src = "";
+            document.getElementById('player-overlay').style.display = "none";
+        }
+
+        window.onload = () => {
+            init();
+            setTimeout(() => {
+                const intro = document.getElementById('intro-screen');
+                intro.style.opacity = '0';
+                setTimeout(() => intro.remove(), 1000);
+            }, 3000);
+        };
+    </script>
+</body>
+</html>
